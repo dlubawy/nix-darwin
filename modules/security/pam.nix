@@ -37,7 +37,7 @@ in
 
       watchIdAuth = lib.mkEnableOption "" // {
         description = ''
-          Use Apple Watch for sudo authentication, for devices without Touch ID or 
+          Use Apple Watch for sudo authentication, for devices without Touch ID or
           laptops with lids closed, consider using this.
 
           When enabled, you can use your Apple Watch to authenticate sudo commands.

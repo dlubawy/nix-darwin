@@ -1,5 +1,7 @@
 { config, lib, pkgs, ... }:
 
+with lib;
+
 let
   inherit (lib) concatStringsSep concatMapStringsSep elem escapeShellArg
     escapeShellArgs filter filterAttrs flatten flip mapAttrs' mapAttrsToList
@@ -11,19 +13,7 @@ let
   group = import ./group.nix;
   user = import ./user.nix;
 
-  toGID = n: v: { "${toString v.gid}" = n; };
-  toUID = n: v: { "${toString v.uid}" = n; };
-
-  isCreated = list: name: elem name list;
-  isDeleted = attrs: name: ! elem name (mapAttrsToList (n: v: v.name) attrs);
-
-  gids = mapAttrsToList toGID (filterAttrs (n: v: isCreated cfg.knownGroups v.name) cfg.groups);
-  uids = mapAttrsToList toUID (filterAttrs (n: v: isCreated cfg.knownUsers v.name) cfg.users);
-
-  createdGroups = mapAttrsToList (n: v: cfg.groups."${v}") cfg.gids;
-  createdUsers = mapAttrsToList (n: v: cfg.users."${v}") cfg.uids;
-  deletedGroups = filter (n: isDeleted cfg.groups n) cfg.knownGroups;
-  deletedUsers = filter (n: isDeleted cfg.users n) cfg.knownUsers;
+  toArguments = concatMapStringsSep " " (v: "'${v}'");
 
   packageUsers = filterAttrs (_: u: u.packages != []) cfg.users;
 
@@ -39,6 +29,14 @@ let
       shells = mapAttrsToList (_: u: u.shell) cfg.users;
     in
       filter types.shellPackage.check shells;
+  dsclSearch = path: key: val: ''dscl . -search ${path} ${key} ${val} | /usr/bin/cut -s -w -f 1 | awk "NF"'';
+  diffArrays = a1: a2: ''echo ''${${a1}[@]} ''${${a1}[@]} ''${${a2}[@]} | tr ' ' '\n' | sort | uniq -u'';
+  groupMembership = g: ''
+    dscl . -list /Users | while read -r user; do
+      printf '%s ' "$user";
+      dsmemberutil checkmembership -U "$user" -G "${g}";
+    done | grep "is a member" | /usr/bin/cut -s -w -f 1
+  '';
 
 in
 
@@ -68,6 +66,17 @@ in
       '';
     };
 
+    users.mutableUsers = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        If set to true, you are free to add new users
+        and groups to the system with the ordinary sysadminctl and dscl commands.
+        The initial password for a user will be set according to users.users,
+        but existing passwords will not be changed.
+      '';
+    };
+
     users.groups = mkOption {
       type = types.attrsOf (types.submodule group);
       default = {};
@@ -78,18 +87,6 @@ in
       type = types.attrsOf (types.submodule user);
       default = {};
       description = "Configuration for users.";
-    };
-
-    users.gids = mkOption {
-      internal = true;
-      type = types.attrsOf types.str;
-      default = {};
-    };
-
-    users.uids = mkOption {
-      internal = true;
-      type = types.attrsOf types.str;
-      default = {};
     };
   };
 
@@ -102,8 +99,16 @@ in
         message = "`users.users.root.home` must be set to either `null` or `/var/root`.";
       }
       {
-        assertion = !builtins.elem "root" deletedUsers;
-        message = "Remove `root` from `users.knownUsers` if you no longer want nix-darwin to manage it.";
+        assertion = !cfg.mutableUsers ->
+          any id (mapAttrsToList (n: v:
+            (v.password != null && v.isTokenUser && v.isAdminUser)
+          ) cfg.users);
+        message = ''
+          You must set a combined admin and token user with a password
+          to prevent being locked out of your system.
+          However, you are most probably better off by setting users.mutableUsers = true; and
+          manually changing the user with dscl.
+        '';
       }
       {
         assertion =
@@ -137,7 +142,17 @@ in
         "fish"
         "zsh"
       ]
-    ));
+    )) ++ (mapAttrsToList (n: v: {
+      assertion = let
+        isEffectivelySystemUser = hasPrefix "_" n && (
+          v.isSystemUser || (v.uid != null && (v.uid >= 200 && v.uid <= 400))
+        );
+      in xor isEffectivelySystemUser v.isNormalUser;
+        message = ''
+          Exactly one of users.users.${n}.isSystemUser and users.users.${n}.isNormalUser must be set.
+          System user name must start with '_' and uid in range (200-400).
+        '';
+    }) cfg.users);
 
     warnings = flatten (flip mapAttrsToList cfg.users (name: user:
       mkIf
@@ -145,187 +160,128 @@ in
         "Set `users.users.${name}.shell = pkgs.bashInteractive;` instead of `pkgs.bash` as it does not include `readline`."
     ));
 
-    users.gids = mkMerge gids;
-    users.uids = mkMerge uids;
-
-    system.checks.text = mkIf (builtins.length (createdUsers ++ deletedUsers) > 0) (mkAfter ''
-      ensurePerms() {
-        homeDirectory=$(dscl . -read /Users/nobody NFSHomeDirectory)
-        homeDirectory=''${homeDirectory#NFSHomeDirectory: }
-
-        if ! dscl . -change /Users/nobody NFSHomeDirectory "$homeDirectory" "$homeDirectory" &> /dev/null; then
-          if [[ "$(launchctl managername)" != Aqua ]]; then
-            printf >&2 '\e[1;31merror: users cannot be %s over SSH without Full Disk Access, aborting activation\e[0m\n' "$2"
-            printf >&2 'The user %s could not be %s as `darwin-rebuild` was not executed with Full Disk Access over SSH.\n' "$1" "$2"
-            printf >&2 'You can either:\n'
-            printf >&2 '\n'
-            printf >&2 '  grant Full Disk Access to all programs run over SSH\n'
-            printf >&2 '\n'
-            printf >&2 'or\n'
-            printf >&2 '\n'
-            printf >&2 '  run `darwin-rebuild` in a graphical session.\n'
-            printf >&2 '\n'
-            printf >&2 'The option "Allow full disk access for remote users" can be found by\n'
-            printf >&2 'navigating to System Settings > General > Sharing > Remote Login\n'
-            printf >&2 'and then pressing on the i icon next to the switch.\n'
-            exit 1
-          else
-            # The TCC service required to change home directories is `kTCCServiceSystemPolicySysAdminFiles`
-            # and we can reset it to ensure the user gets another prompt
-            tccutil reset SystemPolicySysAdminFiles > /dev/null
-
-            if ! dscl . -change /Users/nobody NFSHomeDirectory "$homeDirectory" "$homeDirectory" &> /dev/null; then
-              printf >&2 '\e[1;31merror: permission denied when trying to %s user %s, aborting activation\e[0m\n' "$2" "$1"
-              printf >&2 '`darwin-rebuild` requires permissions to administrate your computer,\n'
-              printf >&2 'please accept the dialog that pops up.\n'
-              printf >&2 '\n'
-              printf >&2 'If you do not wish to be prompted every time `darwin-rebuild` updates your users,\n'
-              printf >&2 'you can grant Full Disk Access to your terminal emulator in System Settings.\n'
-              printf >&2 '\n'
-              printf >&2 'This can be found in System Settings > Privacy & Security > Full Disk Access.\n'
-              exit 1
-            fi
-          fi
-
-        fi
-      }
-
-      ${concatMapStringsSep "\n" (v: let
-        name = escapeShellArg v.name;
-        dsclUser = escapeShellArg "/Users/${v.name}";
-      in ''
-        u=$(id -u ${name} 2> /dev/null) || true
-        if ! [[ -n "$u" && "$u" -ne "${toString v.uid}" ]]; then
-          if [ -z "$u" ]; then
-            ensurePerms ${name} create
-
-            ${optionalString (v.home != null && v.name != "root") ''
-              else
-                homeDirectory=$(dscl . -read ${dsclUser} NFSHomeDirectory)
-                homeDirectory=''${homeDirectory#NFSHomeDirectory: }
-                if [[ ${escapeShellArg v.home} != "$homeDirectory" ]]; then
-                  printf >&2 '\e[1;31merror: config contains the wrong home directory for %s, aborting activation\e[0m\n' ${name}
-                  printf >&2 'nix-darwin does not support changing the home directory of existing users.\n'
-                  printf >&2 '\n'
-                  printf >&2 'Please set:\n'
-                  printf >&2 '\n'
-                  printf >&2 '    users.users.%s.home = "%s";\n' ${name} "$homeDirectory"
-                  printf >&2 '\n'
-                  printf >&2 'or remove it from your configuration.\n'
-                  exit 1
-                fi
-            ''}
-          fi
-        fi
-      '') createdUsers}
-
-      ${concatMapStringsSep "\n" (v: let
-        name = escapeShellArg v;
-      in ''
-        u=$(id -u ${name} 2> /dev/null) || true
-        if [ -n "$u" ]; then
-          if [ "$u" -gt 501 ]; then
-            ensurePerms ${name} delete
-          fi
-        fi
-      '') deletedUsers}
-    '');
-
-    system.activationScripts.groups.text = mkIf (cfg.knownGroups != []) ''
+    system.activationScripts.groups.text = mkIf ((length (attrNames cfg.groups)) > 0) ''
       echo "setting up groups..." >&2
 
-      ${concatMapStringsSep "\n" (v: let
-        dsclGroup = escapeShellArg "/Groups/${v.name}";
-      in ''
-        g=$(dscl . -read ${dsclGroup} PrimaryGroupID 2> /dev/null) || true
-        g=''${g#PrimaryGroupID: }
-        if [ -z "$g" ]; then
-          echo "creating group ${v.name}..." >&2
-          dscl . -create ${dsclGroup} PrimaryGroupID ${toString v.gid}
-          dscl . -create ${dsclGroup} RealName ${escapeShellArg v.description}
-          g=${toString v.gid}
-        fi
+      g=(${toArguments (attrNames cfg.groups)})
+      nix_g=($(${dsclSearch "/Groups" "NixDeclarative" "true"}))
 
-        if [ "$g" -eq ${toString v.gid} ]; then
-          g=$(dscl . -read ${dsclGroup} GroupMembership 2> /dev/null) || true
-          if [ "$g" != 'GroupMembership: ${concatStringsSep " " v.members}' ]; then
-            echo "updating group members ${v.name}..." >&2
-            dscl . -create ${dsclGroup} GroupMembership ${escapeShellArgs v.members}
-          fi
-        else
-          echo "[1;31mwarning: existing group '${v.name}' has unexpected gid $g, skipping...[0m" >&2
-        fi
-      '') createdGroups}
+      ${optionalString (!cfg.mutableUsers) ''
+        # Delete old nix managed groups not in config
+        deleted=("$(${diffArrays "g" "nix_g"})")
+        for group in ''${deleted[@]}; do
+          echo "deleting group $group..."
+          dscl . -delete "/Groups/$group"
+        done
+        unset deleted
+      ''}
 
-      ${concatMapStringsSep "\n" (name: let
-        dsclGroup = escapeShellArg "/Groups/${name}";
-      in ''
-        g=$(dscl . -read ${dsclGroup} PrimaryGroupID 2> /dev/null) || true
-        g=''${g#PrimaryGroupID: }
-        if [ -n "$g" ]; then
-          if [ "$g" -gt 501 ]; then
-            echo "deleting group ${name}..." >&2
-            dscl . -delete ${dsclGroup}
-          else
-            echo "[1;31mwarning: existing group '${name}' has unexpected gid $g, skipping...[0m" >&2
-          fi
+      # Create group properties according to config.
+      # Skip group if users.mutableUsers = true and group already exists.
+      ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: ''
+        ignore=(${if cfg.mutableUsers
+          then "$(dscl . -read /Groups/${n} PrimaryGroupID 2> /dev/null || true)"
+          else ""
+        })
+        if [ -z "''${ignore[*]}" ]; then
+          echo "creating group ${n}..." >&2
+          dscl . -create '/Groups/${n}' PrimaryGroupID ${toString v.gid}
+          dscl . -create '/Groups/${n}' RealName '${v.description}'
+          dscl . -create '/Groups/${n}' GroupMembership ${toArguments v.members}
+          dscl . -create '/Groups/${n}' NixDeclarative 'true'
         fi
-      '') deletedGroups}
+      '') cfg.groups)}
     '';
 
-    system.activationScripts.users.text = mkIf (cfg.knownUsers != []) ''
+    system.activationScripts.users.text = mkIf ((length (attrNames cfg.users)) > 0) ''
       echo "setting up users..." >&2
 
-      ${concatMapStringsSep "\n" (v: let
-        name = escapeShellArg v.name;
-        dsclUser = escapeShellArg "/Users/${v.name}";
-      in ''
-        u=$(id -u ${name} 2> /dev/null) || true
-        if [[ -n "$u" && "$u" -ne "${toString v.uid}" ]]; then
-          echo "[1;31mwarning: existing user '${v.name}' has unexpected uid $u, skipping...[0m" >&2
-        else
-          if [ -z "$u" ]; then
-            echo "creating user ${v.name}..." >&2
+      read -r -a admins <<< "$(${groupMembership "admin"})"
+      read -r -a admins <<< "''${admins[@]/root}"
 
-            sysadminctl -addUser ${escapeShellArgs ([
-              v.name
-              "-UID" v.uid
-              "-GID" v.gid ]
-              ++ (optionals (v.description != null) [ "-fullName" v.description ])
-              ++ [ "-home" (if v.home != null then v.home else "/var/empty") ]
-              ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
-
-            # We need to check as `sysadminctl -addUser` still exits with exit code 0 when there's an error
-            if ! id ${name} &> /dev/null; then
-              printf >&2 '\e[1;31merror: failed to create user %s, aborting activation\e[0m\n' ${name}
-              exit 1
-            fi
-
-            dscl . -create ${dsclUser} IsHidden ${if v.isHidden then "1" else "0"}
-
-            # `sysadminctl -addUser` won't create the home directory if we use the `-home`
-            # flag so we need to do it ourselves
-            ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${name} > /dev/null"}
-          fi
-
-          # Update properties on known users to keep them inline with configuration
-          dscl . -create ${dsclUser} PrimaryGroupID ${toString v.gid}
-          ${optionalString (v.description != null) "dscl . -create ${dsclUser} RealName ${escapeShellArg v.description}"}
-          ${optionalString (v.shell != null) "dscl . -create ${dsclUser} UserShell ${escapeShellArg (shellPath v.shell)}"}
-        fi
-      '') createdUsers}
-
-      ${concatMapStringsSep "\n" (name: ''
-        u=$(id -u ${escapeShellArg name} 2> /dev/null) || true
-        if [ -n "$u" ]; then
-          if [ "$u" -gt 501 ]; then
-            echo "deleting user ${name}..." >&2
-            dscl . -delete ${escapeShellArg "/Users/${name}"}
+      ${optionalString (!cfg.mutableUsers) ''
+        # Delete old nix managed users not in config
+        read -r -a nix_u <<< "$(${dsclSearch "/Users" "NixDeclarative" "true"})"
+        read -r -a u <<< "${toArguments (attrNames cfg.users)}"
+        deleted=("$(${diffArrays "u" "nix_u"})")
+        for user in ''${deleted[@]}; do
+          if [ $(wc -w <<<"''${admins[@]/$user}") -eq 0 ]; then
+            echo "[1;31mwarning: user $user is last user in admin group, skipping...[0m" >&2
           else
-            echo "[1;31mwarning: existing user '${name}' has unexpected uid $u, skipping...[0m" >&2
+            echo "deleting user $user..."
+            # NOTE: '-keepHome' doesn't always work so archive the home dir manually
+            cp -ax "/Users/$user" "/Users/$user (Deleted)" 2>/dev/null || true
+            sysadminctl -deleteUser "$user" 2>/dev/null
+            admins=("''${admins[@]/$user}")
           fi
+        done
+        unset deleted
+      ''}
+
+      # Get admins with secure tokens for management of regular token users
+      read -r -a tokenAdmins <<< "$(for user in "''${admins[@]}"; do
+        printf '%s ' "$user";
+        sysadminctl -secureTokenStatus "$user" 2>/dev/stdout;
+      done | grep "is ENABLED" | /usr/bin/cut -s -w -f 1)"
+
+      # Create and overwrite user properties according to config.
+      # Skip overwrite if users.mutableUsers = true,
+      # and user already exists.
+      ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: let
+        dsclUser = lib.escapeShellArg "/Users/${v.name}";
+        in ''
+        ignore=("$(dscl . -read /Users/${n} UniqueID 2> /dev/null || true)")
+        mutable="${if cfg.mutableUsers then "true" else ""}"
+
+        # Always create users that don't exist
+        if [ -z "''${ignore[*]}" ]; then
+          echo "creating user ${v.name}..." >&2
+          # NOTE: use sysadminctl to ensure all macOS user attributes are set.
+          # Otherwise, user management might break in System Settings with just dscl.
+          sysadminctl -addUser ${escapeShellArgs ([
+            v.name
+            "-UID" v.uid
+            "-GID" v.gid ]
+            ++ (optionals (v.description != null) [ "-fullName" v.description ])
+            ++ [ "-home" (if v.home != null then v.home else "/var/empty") ]
+ 	    ++ (optionals (v.isSystemUser) [ "-roleAccount" ])
+ 	    ++ (optionals (v.initialPassword != null) [ "-password" v.initialPassword ])
+            ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
+
+          # We need to check as `sysadminctl -addUser` still exits with exit code 0 when there's an error
+          if ! id ${v.name} &> /dev/null; then
+            printf >&2 '\e[1;31merror: failed to create user %s, aborting activation\e[0m\n' ${v.name}
+            exit 1
+          fi
+
+          dscl . -create ${dsclUser} IsHidden ${if v.isHidden then "1" else "0"}
+
+          # `sysadminctl -addUser` won't create the home directory if we use the `-home`
+          # flag so we need to do it ourselves
+          ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${v.name} > /dev/null"}
+          ${
+             optionalString v.isTokenUser ''
+               # NOTE: only admin with token can set a token for a user
+               sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
+                -secureTokenOn '${v.name}' -password '${if v.password == null then "-" else "${v.password}"}'
+             ''
+           }
+        elif [ -z "$mutable" ]; then
+          isTokenUser=$(sysadminctl -secureTokenStatus '${v.name}' 2>/dev/stdout \
+          | grep -o "is ENABLED" | wc -w)
+          # Admin with token is needed to reset user with token
+          if [ "$isTokenUser" -gt 0 ]; then
+            sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
+            -resetPasswordFor '${v.name}' -newPassword "${v.password}"
+          else
+            sysadminctl -resetPasswordFor '${v.name}' -newPassword "${v.password}"
+          fi
+          unset isTokenUser
+          dscl . -create '/Users/${v.name}' IsHidden ${if v.isHidden then "1" else "0"}
         fi
-      '') deletedUsers}
+        # Always set managed user NixDeclarative property if Nix is managing the user
+        dscl . -create '/Users/${v.name}' NixDeclarative 'true'
+      '') cfg.users)}
     '';
 
     # Install all the user shells
