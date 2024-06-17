@@ -275,11 +275,20 @@ in
     system.activationScripts.users.text = mkIf (cfg.knownUsers != []) ''
       echo "setting up users..." >&2
 
-      ${concatMapStringsSep "\n" (v: let
-        name = escapeShellArg v.name;
-        dsclUser = escapeShellArg "/Users/${v.name}";
-      in ''
-        u=$(id -u ${name} 2> /dev/null) || true
+      ${concatMapStringsSep "\n" (v: ''
+        ${optionalString cfg.forceRecreate ''
+          u=$(dscl . -read '/Users/${v.name}' UniqueID 2> /dev/null) || true
+          u=''${u#UniqueID: }
+          if [[ "$u" -eq ${toString v.uid} ]]; then
+            echo "deleting user ${v.name}..." >&2
+            sysadminctl -deleteUser '${v.name}' 2>/dev/null
+          else
+            echo "[1;31mwarning: existing user '${v.name}' has unexpected uid $u, skipping...[0m" >&2
+          fi
+        ''}
+
+        u=$(dscl . -read '/Users/${v.name}' UniqueID 2> /dev/null) || true
+        u=''${u#UniqueID: }
         if [[ -n "$u" && "$u" -ne "${toString v.uid}" ]]; then
           echo "[1;31mwarning: existing user '${v.name}' has unexpected uid $u, skipping...[0m" >&2
         else
@@ -319,7 +328,7 @@ in
         if [ -n "$u" ]; then
           if [ "$u" -gt 501 ]; then
             echo "deleting user ${name}..." >&2
-            dscl . -delete ${escapeShellArg "/Users/${name}"}
+            sysadminctl -deleteUser '${name}' 2> /dev/null
           else
             echo "[1;31mwarning: existing user '${name}' has unexpected uid $u, skipping...[0m" >&2
           fi
