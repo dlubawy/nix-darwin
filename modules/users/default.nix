@@ -315,6 +315,10 @@ in
             # `sysadminctl -addUser` won't create the home directory if we use the `-home`
             # flag so we need to do it ourselves
             ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${name} > /dev/null"}
+            ${
+               optionalString (v.isHidden == false && v.initialPassword != null)
+                 "sysadminctl -adminUser \"$(id -F 501)\" -adminPassword - -secureTokenOn '${v.name}' -password '${v.initialPassword}'"
+             }
           fi
 
           # Update properties on known users to keep them inline with configuration
