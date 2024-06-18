@@ -71,9 +71,14 @@
     };
 
     initialPassword = mkOption {
-      type = types.string;
-      default = false;
-      description = "Sets the initial password for the user.";
+      type = with types; nullOr str;
+      default = null;
+      description = ''
+        Specifies the initial password for the user,
+        i.e. the password assigned if the user does not already exist.
+        If {option}`users.isHidden` is set to false,
+        then the password is used for configuring a secure token for disk encryption.
+      '';
     };
 
     shell = mkOption {
