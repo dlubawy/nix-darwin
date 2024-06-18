@@ -301,6 +301,7 @@ in
               "-GID" v.gid ]
               ++ (optionals (v.description != null) [ "-fullName" v.description ])
               ++ [ "-home" (if v.home != null then v.home else "/var/empty") ]
+ 	      ++ (optionals (v.isSystemUser) [ "-roleAccount" ])
  	      ++ (optionals (v.initialPassword != null) [ "-password" v.initialPassword ])
               ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
 
@@ -316,7 +317,7 @@ in
             # flag so we need to do it ourselves
             ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${name} > /dev/null"}
             ${
-               optionalString (v.isHidden == false && v.initialPassword != null)
+               optionalString v.isTokenUser
                  "sysadminctl -adminUser \"$(id -F 501)\" -adminPassword - -secureTokenOn '${v.name}' -password '${v.initialPassword}'"
              }
           fi
