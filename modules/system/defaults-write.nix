@@ -10,7 +10,7 @@ let
 
   defaultsToList = domain: attrs: mapAttrsToList (writeDefault domain) (filterAttrs (n: v: v != null) attrs);
 
-  configurableUsers = lib.filterAttrs (n: v: lib.hasPrefix "/Users" v.home) config.users.users;
+  configurableUsers = filterAttrs (n: v: hasPrefix "/Users" v.home) config.users.users;
   userDefaultsToList = domain: attrs: builtins.concatLists (mapAttrsToList (n: v:
     (builtins.map (cmd: "sudo -u ${n} " + cmd) (defaultsToList "${v.home}/Library/Preferences/${domain}" attrs))
   ) configurableUsers);
