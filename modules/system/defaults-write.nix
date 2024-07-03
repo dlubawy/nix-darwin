@@ -13,7 +13,7 @@ let
   # dock has alias options that we need to ignore
   dockFiltered = (builtins.removeAttrs cfg.dock ["expose-group-by-app"]);
 
-  configurableUsers = lib.filterAttrs (n: v: lib.hasPrefix "/Users" v.home) config.users.users;
+  configurableUsers = filterAttrs (n: v: hasPrefix "/Users" v.home) config.users.users;
   userDefaultsToList = domain: attrs: builtins.concatLists (mapAttrsToList (n: v:
     (builtins.map (cmd: "sudo -u ${n} " + cmd) (defaultsToList "${v.home}/Library/Preferences/${domain}" attrs))
   ) configurableUsers);
