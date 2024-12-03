@@ -134,7 +134,7 @@ in
       ]
     )) ++ (mapAttrsToList (n: v: {
       assertion = let
-        isEffectivelySystemUser = hasPrefix "_" n && (
+        isEffectivelySystemUser = lib.strings.hasPrefix "_" n && (
           v.isSystemUser || (v.uid != null && (v.uid >= 200 && v.uid <= 400))
         );
       in xor isEffectivelySystemUser v.isNormalUser;
