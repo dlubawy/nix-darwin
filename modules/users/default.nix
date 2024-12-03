@@ -163,7 +163,7 @@ in
         "Set `users.users.${name}.shell = pkgs.bashInteractive;` instead of `pkgs.bash` as it does not include `readline`."
     ));
 
-    system.activationScripts.groups.text = mkIf ((length (attrNames cfg.groups)) > 0) ''
+    system.activationScripts.groups.text = mkIf ((builtins.length (attrNames cfg.groups)) > 0) ''
       echo "setting up groups..." >&2
 
       g=(${toArguments (attrNames cfg.groups)})
@@ -196,7 +196,7 @@ in
       '') cfg.groups)}
     '';
 
-    system.activationScripts.users.text = mkIf ((length (attrNames cfg.users)) > 0) ''
+    system.activationScripts.users.text = mkIf ((builtins.length (attrNames cfg.users)) > 0) ''
       echo "setting up users..." >&2
 
       read -r -a admins <<< "$(${groupMembership "admin"})"
