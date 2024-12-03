@@ -107,6 +107,19 @@ in
         assertion = !builtins.elem "root" deletedUsers;
         message = "Remove `root` from `users.knownUsers` if you no longer want nix-darwin to manage it.";
       }
+      {
+        assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
+          any id (mapAttrsToList (n: v:
+            (v.password != null && v.isTokenUser && v.isAdminUser)
+          ) cfg.users);
+        message = ''
+          You must set a combined admin and token user with a password
+          to prevent being locked out of your system.
+          If you really want to be locked out of your system, set users.forceRecreate = true;
+          However, you are most probably better off by setting users.mutableUsers = true; and
+          manually changing the user with dscl.
+        '';
+      }
     ] ++ flatten (flip mapAttrsToList cfg.users (name: user:
       map (shell: {
         assertion = let
@@ -129,29 +142,7 @@ in
         "fish"
         "zsh"
       ]
-    ));
-
-    warnings = flatten (flip mapAttrsToList cfg.users (name: user:
-      mkIf
-        (user.shell.pname or null == "bash")
-        "Set `users.users.${name}.shell = pkgs.bashInteractive;` instead of `pkgs.bash` as it does not include `readline`."
-    ));
-
-    assertions = [
-      {
-        assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
-          any id (mapAttrsToList (n: v:
-            (v.password != null && v.isTokenUser && v.isAdminUser)
-          ) cfg.users);
-        message = ''
-          You must set a combined admin and token user with a password
-          to prevent being locked out of your system.
-          If you really want to be locked out of your system, set users.forceRecreate = true;
-          However, you are most probably better off by setting users.mutableUsers = true; and
-          manually changing the user with dscl.
-        '';
-      }
-    ] ++ (mapAttrsToList (n: v: {
+    )) ++ (mapAttrsToList (n: v: {
       assertion = let
         isEffectivelySystemUser = hasPrefix "_" n && (
           v.isSystemUser || (v.uid != null && (v.uid >= 200 && v.uid <= 400))
@@ -162,6 +153,12 @@ in
           System user name must start with '_' and uid in range (200-400).
         '';
     }) cfg.users);
+
+    warnings = flatten (flip mapAttrsToList cfg.users (name: user:
+      mkIf
+        (user.shell.pname or null == "bash")
+        "Set `users.users.${name}.shell = pkgs.bashInteractive;` instead of `pkgs.bash` as it does not include `readline`."
+    ));
 
     system.activationScripts.groups.text = mkIf ((length (attrNames cfg.groups)) > 0) ''
       echo "setting up groups..." >&2
