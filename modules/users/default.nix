@@ -1,5 +1,7 @@
 { config, lib, pkgs, ... }:
 
+with lib;
+
 let
   inherit (lib) concatStringsSep concatMapStringsSep elem escapeShellArg
     escapeShellArgs filter filterAttrs flatten flip mapAttrs' mapAttrsToList
@@ -105,7 +107,7 @@ in
       }
       {
         assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
-          lib.lists.any builtins.id (mapAttrsToList (n: v:
+          any id (mapAttrsToList (n: v:
             (v.password != null && v.isTokenUser && v.isAdminUser)
           ) cfg.users);
         message = ''
@@ -140,7 +142,7 @@ in
       ]
     )) ++ (mapAttrsToList (n: v: {
       assertion = let
-        isEffectivelySystemUser = lib.strings.hasPrefix "_" n && (
+        isEffectivelySystemUser = hasPrefix "_" n && (
           v.isSystemUser || (v.uid != null && (v.uid >= 200 && v.uid <= 400))
         );
       in xor isEffectivelySystemUser v.isNormalUser;
@@ -156,10 +158,10 @@ in
         "Set `users.users.${name}.shell = pkgs.bashInteractive;` instead of `pkgs.bash` as it does not include `readline`."
     ));
 
-    system.activationScripts.groups.text = mkIf ((builtins.length (builtins.attrNames cfg.groups)) > 0) ''
+    system.activationScripts.groups.text = mkIf ((length (attrNames cfg.groups)) > 0) ''
       echo "setting up groups..." >&2
 
-      g=(${toArguments (builtins.attrNames cfg.groups)})
+      g=(${toArguments (attrNames cfg.groups)})
       nix_g=($(${dsclSearch "/Groups" "NixDeclarative" "true"}))
 
       ${optionalString (!cfg.mutableUsers || cfg.forceRecreate) ''
@@ -189,10 +191,10 @@ in
       '') cfg.groups)}
     '';
 
-    system.activationScripts.users.text = mkIf ((builtins.length (builtins.attrNames cfg.users)) > 0) ''
+    system.activationScripts.users.text = mkIf ((length (attrNames cfg.users)) > 0) ''
       echo "setting up users..." >&2
 
-      u=(${toArguments (builtins.attrNames cfg.users)})
+      u=(${toArguments (attrNames cfg.users)})
       nix_u=($(${dsclSearch "/Users" "NixDeclarative" "true"}))
       admins=($(${groupMembership "admin"}))
       admins=(''${admins[@]/root})
