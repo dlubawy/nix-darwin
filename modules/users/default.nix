@@ -248,8 +248,8 @@ in
             ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
 
           # We need to check as `sysadminctl -addUser` still exits with exit code 0 when there's an error
-          if ! id ${name} &> /dev/null; then
-            printf >&2 '\e[1;31merror: failed to create user %s, aborting activation\e[0m\n' ${name}
+          if ! id ${v.name} &> /dev/null; then
+            printf >&2 '\e[1;31merror: failed to create user %s, aborting activation\e[0m\n' ${v.name}
             exit 1
           fi
 
@@ -257,7 +257,7 @@ in
 
           # `sysadminctl -addUser` won't create the home directory if we use the `-home`
           # flag so we need to do it ourselves
-          ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${name} > /dev/null"}
+          ${optionalString (v.home != null && v.createHome) "createhomedir -cu ${v.name} > /dev/null"}
           ${
              optionalString v.isTokenUser ''
                # NOTE: only admin with token can set a token for a user
