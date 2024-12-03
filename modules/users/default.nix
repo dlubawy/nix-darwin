@@ -105,7 +105,7 @@ in
       }
       {
         assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
-          any id (mapAttrsToList (n: v:
+          builtins.any id (mapAttrsToList (n: v:
             (v.password != null && v.isTokenUser && v.isAdminUser)
           ) cfg.users);
         message = ''
