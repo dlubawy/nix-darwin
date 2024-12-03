@@ -110,6 +110,19 @@ in
           manually changing the user with dscl.
         '';
       }
+      {
+        assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
+          any id (mapAttrsToList (n: v:
+            (v.password != null && v.isTokenUser && v.isAdminUser)
+          ) cfg.users);
+        message = ''
+          You must set a combined admin and token user with a password
+          to prevent being locked out of your system.
+          If you really want to be locked out of your system, set users.forceRecreate = true;
+          However, you are most probably better off by setting users.mutableUsers = true; and
+          manually changing the user with dscl.
+        '';
+      }
     ] ++ flatten (flip mapAttrsToList cfg.users (name: user:
       map (shell: {
         assertion = let
