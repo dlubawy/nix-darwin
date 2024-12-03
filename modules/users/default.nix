@@ -227,7 +227,9 @@ in
       # Create and overwrite user properties according to config.
       # Skip overwrite if users.mutableUsers = true,
       # users.forceRecreate = false, and user already exists.
-      ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: ''
+      ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: let
+        dsclUser = lib.escapeShellArg "/Users/${v.name}";
+        in ''
         ignore=("$(dscl . -read /Users/${n} UniqueID 2> /dev/null || true)")
         force="${if (!cfg.mutableUsers && cfg.forceRecreate) then "true" else ""}"
         mutable="${if cfg.mutableUsers then "true" else ""}"
