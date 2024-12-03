@@ -104,10 +104,6 @@ in
         message = "`users.users.root.home` must be set to either `null` or `/var/root`.";
       }
       {
-        assertion = !builtins.elem "root" deletedUsers;
-        message = "Remove `root` from `users.knownUsers` if you no longer want nix-darwin to manage it.";
-      }
-      {
         assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
           any id (mapAttrsToList (n: v:
             (v.password != null && v.isTokenUser && v.isAdminUser)
