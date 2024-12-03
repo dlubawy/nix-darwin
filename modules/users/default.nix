@@ -88,13 +88,6 @@ in
       default = {};
       description = "Configuration for users.";
     };
-
-    users.forceRecreate = mkOption {
-      internal = true;
-      type = types.bool;
-      default = false;
-      description = "Remove and recreate existing groups/users.";
-    };
   };
 
   config = {
@@ -106,14 +99,13 @@ in
         message = "`users.users.root.home` must be set to either `null` or `/var/root`.";
       }
       {
-        assertion = !cfg.mutableUsers -> !cfg.forceRecreate ->
+        assertion = !cfg.mutableUsers ->
           any id (mapAttrsToList (n: v:
             (v.password != null && v.isTokenUser && v.isAdminUser)
           ) cfg.users);
         message = ''
           You must set a combined admin and token user with a password
           to prevent being locked out of your system.
-          If you really want to be locked out of your system, set users.forceRecreate = true;
           However, you are most probably better off by setting users.mutableUsers = true; and
           manually changing the user with dscl.
         '';
@@ -164,9 +156,9 @@ in
       g=(${toArguments (attrNames cfg.groups)})
       nix_g=($(${dsclSearch "/Groups" "NixDeclarative" "true"}))
 
-      ${optionalString (!cfg.mutableUsers || cfg.forceRecreate) ''
+      ${optionalString (!cfg.mutableUsers) ''
         # Delete old nix managed groups not in config
-        deleted=(${if cfg.forceRecreate then "$g" else "$(${diffArrays "g" "nix_g"})"})
+        deleted=("$(${diffArrays "g" "nix_g"})")
         for group in ''${deleted[@]}; do
           echo "deleting group $group..."
           dscl . -delete "/Groups/$group"
@@ -199,9 +191,9 @@ in
       admins=($(${groupMembership "admin"}))
       admins=(''${admins[@]/root})
 
-      ${optionalString (!cfg.mutableUsers || cfg.forceRecreate) ''
+      ${optionalString (!cfg.mutableUsers) ''
         # Delete old nix managed users not in config
-        deleted=(${if cfg.forceRecreate then "$u" else "$(${diffArrays "u" "nix_u"})"})
+        deleted=("$(${diffArrays "u" "nix_u"})")
         for user in ''${deleted[@]}; do
           if [ $(wc -w <<<''${admins[@]/$user}) -eq 0 ]; then
             echo "[1;31mwarning: user $user is last user in admin group, skipping...[0m" >&2
@@ -224,12 +216,11 @@ in
 
       # Create and overwrite user properties according to config.
       # Skip overwrite if users.mutableUsers = true,
-      # users.forceRecreate = false, and user already exists.
+      # and user already exists.
       ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: let
         dsclUser = lib.escapeShellArg "/Users/${v.name}";
         in ''
         ignore=("$(dscl . -read /Users/${n} UniqueID 2> /dev/null || true)")
-        force="${if (!cfg.mutableUsers && cfg.forceRecreate) then "true" else ""}"
         mutable="${if cfg.mutableUsers then "true" else ""}"
 
         # Always create users that don't exist
@@ -265,15 +256,6 @@ in
                 -secureTokenOn '${v.name}' -password '${if v.password == null then "-" else "${v.password}"}'
              ''
            }
-        elif [ -n "$force" ]; then
-          dscl . -create '/Users/${v.name}' UniqueID ${toString v.uid}
-          dscl . -create '/Users/${v.name}' PrimaryGroupID ${toString v.gid}
-          dscl . -create '/Users/${v.name}' IsHidden ${if v.isHidden then "1" else "0"}
-          dscl . -create '/Users/${v.name}' RealName '${v.description}'
-          dscl . -create '/Users/${v.name}' NFSHomeDirectory '${v.home}'
-          dscl . -create '/Users/${v.name}' UserShell ${lib.escapeShellArg (shellPath v.shell)}
-          ${optionalString v.isAdminUser "dscl . -merge '/Groups/admin' GroupMembership '${v.name}'"}
-          ${optionalString v.createHome "createhomedir -cu '${v.name}'"}
         elif [ -z "$mutable" ]; then
           isTokenUser=$(sysadminctl -secureTokenStatus '${v.name}' 2>/dev/stdout \
           | grep -o "is ENABLED" | wc -w)
