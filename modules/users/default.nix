@@ -252,7 +252,7 @@ in
           ${
              optionalString v.isTokenUser ''
                # NOTE: only admin with token can set a token for a user
-               sysadminctl -adminUser "$(echo $tokenAdmins | head -n 1)" -adminPassword - \
+               sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
                 -secureTokenOn '${v.name}' -password '${if v.password == null then "-" else "${v.password}"}'
              ''
            }
@@ -261,7 +261,7 @@ in
           | grep -o "is ENABLED" | wc -w)
           # Admin with token is needed to reset user with token
           if [ "$isTokenUser" -gt 0 ]; then
-            sysadminctl -adminUser "$(echo $tokenAdmins | head -n 1)" -adminPassword - \
+            sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
             -resetPasswordFor '${v.name}' -newPassword "${v.password}"
           else
             sysadminctl -resetPasswordFor '${v.name}' -newPassword "${v.password}"
