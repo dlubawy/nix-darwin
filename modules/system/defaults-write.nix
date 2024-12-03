@@ -85,6 +85,7 @@ in
         menuExtraClock
         dock
         finder
+        hitoolbox
         magicmouse
         magicmouseBluetooth
         screencapture
@@ -109,6 +110,7 @@ in
         ${concatStringsSep "\n" menuExtraClock}
         ${concatStringsSep "\n" dock}
         ${concatStringsSep "\n" finder}
+        ${concatStringsSep "\n" hitoolbox}
         ${concatStringsSep "\n" magicmouse}
         ${concatStringsSep "\n" magicmouseBluetooth}
         ${concatStringsSep "\n" screencapture}
