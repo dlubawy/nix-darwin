@@ -32,7 +32,7 @@ let
   dsclSearch = path: key: val: ''dscl . -search ${path} ${key} ${val} | /usr/bin/cut -s -w -f 1 | awk "NF"'';
   diffArrays = a1: a2: ''echo ''${${a1}[@]} ''${${a1}[@]} ''${${a2}[@]} | tr ' ' '\n' | sort | uniq -u'';
   groupMembership = g: ''
-    dscl . -list /Users | while read user; do
+    dscl . -list /Users | while read -r user; do
       printf '%s ' "$user";
       dsmemberutil checkmembership -U "$user" -G "${g}";
     done | grep "is a member" | /usr/bin/cut -s -w -f 1
@@ -173,7 +173,7 @@ in
           then "$(dscl . -read /Groups/${n} PrimaryGroupID 2> /dev/null || true)"
           else ""
         })
-        if [ -z "$ignore" ]; then
+        if [ -z "''${ignore[*]}" ]; then
           echo "creating group ${n}..." >&2
           dscl . -create '/Groups/${n}' PrimaryGroupID ${toString v.gid}
           dscl . -create '/Groups/${n}' RealName '${v.description}'
@@ -186,33 +186,33 @@ in
     system.activationScripts.users.text = mkIf ((length (attrNames cfg.users)) > 0) ''
       echo "setting up users..." >&2
 
-      u=(${toArguments (attrNames cfg.users)})
-      nix_u=($(${dsclSearch "/Users" "NixDeclarative" "true"}))
-      admins=($(${groupMembership "admin"}))
-      admins=(''${admins[@]/root})
+      read -r -a admins <<< "$(${groupMembership "admin"})"
+      read -r -a admins <<< "''${admins[@]/root}"
 
       ${optionalString (!cfg.mutableUsers) ''
         # Delete old nix managed users not in config
+        read -r -a nix_u <<< "$(${dsclSearch "/Users" "NixDeclarative" "true"})"
+        read -r -a u <<< "${toArguments (attrNames cfg.users)}"
         deleted=("$(${diffArrays "u" "nix_u"})")
         for user in ''${deleted[@]}; do
-          if [ $(wc -w <<<''${admins[@]/$user}) -eq 0 ]; then
+          if [ $(wc -w <<<"''${admins[@]/$user}") -eq 0 ]; then
             echo "[1;31mwarning: user $user is last user in admin group, skipping...[0m" >&2
           else
             echo "deleting user $user..."
             # NOTE: '-keepHome' doesn't always work so archive the home dir manually
             cp -ax "/Users/$user" "/Users/$user (Deleted)" 2>/dev/null || true
             sysadminctl -deleteUser "$user" 2>/dev/null
-            admins=(''${admins[@]/$user})
+            admins=("''${admins[@]/$user}")
           fi
         done
         unset deleted
       ''}
 
       # Get admins with secure tokens for management of regular token users
-      tokenAdmins=($(for user in "''${admins[@]}"; do
+      read -r -a tokenAdmins <<< "$(for user in "''${admins[@]}"; do
         printf '%s ' "$user";
         sysadminctl -secureTokenStatus "$user" 2>/dev/stdout;
-      done | grep "is ENABLED" | /usr/bin/cut -s -w -f 1))
+      done | grep "is ENABLED" | /usr/bin/cut -s -w -f 1)"
 
       # Create and overwrite user properties according to config.
       # Skip overwrite if users.mutableUsers = true,
@@ -224,7 +224,7 @@ in
         mutable="${if cfg.mutableUsers then "true" else ""}"
 
         # Always create users that don't exist
-        if [ -z "$ignore" ]; then
+        if [ -z "''${ignore[*]}" ]; then
           echo "creating user ${v.name}..." >&2
           # NOTE: use sysadminctl to ensure all macOS user attributes are set.
           # Otherwise, user management might break in System Settings with just dscl.
