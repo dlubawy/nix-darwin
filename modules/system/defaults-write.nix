@@ -29,8 +29,9 @@ let
   LaunchServices = userDefaultsToList "com.apple.LaunchServices" cfg.LaunchServices;
   NSGlobalDomain = userDefaultsToList "-g" cfg.NSGlobalDomain;
   menuExtraClock = userDefaultsToList "com.apple.menuextra.clock" cfg.menuExtraClock;
-  dock = userDefaultsToList "com.apple.dock" cfg.dock;
+  dock = userDefaultsToList "com.apple.dock" dockFiltered;
   finder = userDefaultsToList "com.apple.finder" cfg.finder;
+  hitoolbox = userDefaultsToList "com.apple.HIToolbox" cfg.hitoolbox;
   magicmouse = userDefaultsToList "com.apple.AppleMultitouchMouse" cfg.magicmouse;
   magicmouseBluetooth = userDefaultsToList "com.apple.driver.AppleMultitouchMouse.mouse" cfg.magicmouse;
   screencapture = userDefaultsToList "com.apple.screencapture" cfg.screencapture;
@@ -41,6 +42,7 @@ let
   universalaccess = userDefaultsToList "com.apple.universalaccess" cfg.universalaccess;
   ActivityMonitor = userDefaultsToList "com.apple.ActivityMonitor" cfg.ActivityMonitor;
   WindowManager = userDefaultsToList "com.apple.WindowManager" cfg.WindowManager;
+  controlcenter = userDefaultsToList "~/Library/Preferences/ByHost/com.apple.controlcenter" cfg.controlcenter;  
   CustomUserPreferences = flatten (mapAttrsToList (name: value: userDefaultsToList name value) cfg.CustomUserPreferences);
   CustomSystemPreferences = flatten (mapAttrsToList (name: value: userDefaultsToList name value) cfg.CustomSystemPreferences);
 
