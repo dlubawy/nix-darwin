@@ -52,6 +52,16 @@
     #   description = "The user's auxiliary groups.";
     # };
 
+    initialPassword = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = ''
+        Specifies the (clear text) initial password for the user on creation.
+        Warning: do not set confidential information here because it is world-readable in the Nix store.
+        This option should only be used for public accounts, with a Nix secrets manager, or for a temporary password.
+      '';
+    };
+
     home = mkOption {
       type = types.nullOr types.path;
       default = null;

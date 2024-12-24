@@ -296,6 +296,7 @@ in
               "-UID" v.uid
               "-GID" v.gid ]
               ++ (optionals (v.description != null) [ "-fullName" v.description ])
+              ++ (optionals (v.initialPassword != null) [ "-password" v.initialPassword ])
               ++ [ "-home" (if v.home != null then v.home else "/var/empty") ]
               ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
 
