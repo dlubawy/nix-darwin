@@ -231,7 +231,6 @@ in
         dsclUser = lib.escapeShellArg "/Users/${v.name}";
         in ''
         ignore=("$(dscl . -read /Users/${n} UniqueID 2> /dev/null || true)")
-        mutable="${if cfg.mutableUsers then "true" else ""}"
 
         # Always create users that don't exist
         if [ -z "''${ignore[*]}" ]; then
@@ -244,8 +243,8 @@ in
             "-GID" v.gid ]
             ++ (optionals (v.description != null) [ "-fullName" v.description ])
             ++ [ "-home" (if v.home != null then v.home else "/var/empty") ]
- 	    ++ (optionals (v.isSystemUser) [ "-roleAccount" ])
- 	    ++ (optionals (v.initialPassword != null) [ "-password" v.initialPassword ])
+            ++ (optionals (v.isSystemUser) [ "-roleAccount" ])
+            ++ (optionals (v.initialPassword != null) [ "-password" v.initialPassword ])
             ++ [ "-shell" (if v.shell != null then shellPath v.shell else "/usr/bin/false") ])} 2> /dev/null
 
           # We need to check as `sysadminctl -addUser` still exits with exit code 0 when there's an error
@@ -266,18 +265,20 @@ in
                 -secureTokenOn '${v.name}' -password '${if v.password == null then "-" else "${v.password}"}'
              ''
            }
-        elif [ -z "$mutable" ]; then
-          isTokenUser=$(sysadminctl -secureTokenStatus '${v.name}' 2>/dev/stdout \
-          | grep -o "is ENABLED" | wc -w)
-          # Admin with token is needed to reset user with token
-          if [ "$isTokenUser" -gt 0 ]; then
-            sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
-            -resetPasswordFor '${v.name}' -newPassword "${v.password}"
-          else
-            sysadminctl -resetPasswordFor '${v.name}' -newPassword "${v.password}"
-          fi
-          unset isTokenUser
-          dscl . -create '/Users/${v.name}' IsHidden ${if v.isHidden then "1" else "0"}
+        ${optionalString (!cfg.mutableUsers) ''
+          elif [ true ]; then
+            isTokenUser=$(sysadminctl -secureTokenStatus '${v.name}' 2>/dev/stdout \
+            | grep -o "is ENABLED" | wc -w)
+            # Admin with token is needed to reset user with token
+            if [ "$isTokenUser" -gt 0 ]; then
+              sysadminctl -adminUser "''${tokenAdmins[0]}" -adminPassword - \
+              -resetPasswordFor '${v.name}' -newPassword "${v.password}"
+            else
+              sysadminctl -resetPasswordFor '${v.name}' -newPassword "${v.password}"
+            fi
+            unset isTokenUser
+            dscl . -create '/Users/${v.name}' IsHidden ${if v.isHidden then "1" else "0"}
+        ''}
         fi
         # Always set managed user NixDeclarative property if Nix is managing the user
         dscl . -create '/Users/${v.name}' NixDeclarative 'true'
