@@ -163,12 +163,12 @@ in
     system.activationScripts.groups.text = mkIf ((length (attrNames cfg.groups)) > 0) ''
       echo "setting up groups..." >&2
 
-      g=(${toArguments (attrNames cfg.groups)})
-      nix_g=($(${dsclSearch "/Groups" "NixDeclarative" "true"}))
-
       ${optionalString (!cfg.mutableUsers) ''
+        g=(${toArguments (attrNames cfg.groups)})
+        read -r -a nix_g < <(${dsclSearch "/Groups" "NixDeclarative" "true"})
+
         # Delete old nix managed groups not in config
-        deleted=("$(${diffArrays "g" "nix_g"})")
+        read -r -a deleted < <(echo ''${g[@]} ''${g[@]} ''${nix_g[@]} | tr ' ' '\n' | sort | uniq -u | tr '\n' ' ')
         for group in ''${deleted[@]}; do
           echo "deleting group $group..."
           dscl . -delete "/Groups/$group"
@@ -179,9 +179,9 @@ in
       # Create group properties according to config.
       # Skip group if users.mutableUsers = true and group already exists.
       ${concatMapStringsSep "\n" (v: v) (mapAttrsToList (n: v: ''
-        ignore=(${if cfg.mutableUsers
-          then "$(dscl . -read /Groups/${n} PrimaryGroupID 2> /dev/null || true)"
-          else ""
+        read -r -a ignore < <(${if cfg.mutableUsers
+          then "dscl . -read /Groups/${n} PrimaryGroupID 2> /dev/null || true"
+          else "echo ''"
         })
         if [ -z "''${ignore[*]}" ]; then
           echo "creating group ${n}..." >&2
@@ -203,7 +203,7 @@ in
         # Delete old nix managed users not in config
         read -r -a nix_u <<< "$(${dsclSearch "/Users" "NixDeclarative" "true"})"
         read -r -a u <<< "${toArguments (attrNames cfg.users)}"
-        deleted=("$(${diffArrays "u" "nix_u"})")
+        read -r -a deleted < <(echo ''${u[@]} ''${u[@]} ''${nix_u[@]} | tr ' ' '\n' | sort | uniq -u | tr '\n' ' ')
         for user in ''${deleted[@]}; do
           if [ $(wc -w <<<"''${admins[@]/$user}") -eq 0 ]; then
             echo "[1;31mwarning: user $user is last user in admin group, skipping...[0m" >&2
