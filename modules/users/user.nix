@@ -1,5 +1,7 @@
 { name, config, lib, ... }:
-
+let
+  cfg = if builtins.hasAttr "users" config then config.users else {mutableUsers = true;};
+in
 with lib;
 {
   options = let
@@ -184,9 +186,8 @@ with lib;
       isSystemUser = mkDefault false;
     })
 
-    {
-      password = mkDefault (if config.initialPassword != null
-        then "${config.initialPassword}" else "${config.password}");
-    }
+    (mkIf (!cfg.mutableUsers && config.initialPassword != null) {
+      password = mkDefault config.initialPassword;
+    })
   ];
 }
